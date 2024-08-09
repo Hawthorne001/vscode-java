@@ -5,7 +5,7 @@
   "author": "Red Hat",
   "icon": "icons/icon128.png",
   "license": "EPL-2.0",
-  "version": "1.33.0",
+  "version": "1.34.0",
   "publisher": "redhat",
   "bugs": "https://github.com/redhat-developer/vscode-java/issues",
   "preview": false,
@@ -1472,6 +1472,15 @@
             "type": "boolean",
             "default": false,
             "markdownDescription": "Specifies whether to recheck all open Java files for diagnostics when editing a Java file.",
+            "scope": "window"
+          },
+          "java.diagnostic.filter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Specifies a list of file patterns for which matching documents should not have their diagnostics reported (eg. '**/Foo.java').",
             "scope": "window"
           },
           "java.editor.reloadChangedSources": {

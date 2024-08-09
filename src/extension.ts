@@ -6,7 +6,7 @@ import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as semver from 'semver';
-import { CodeActionContext, commands, ConfigurationTarget, Diagnostic, env, EventEmitter, ExtensionContext, extensions, IndentAction, InputBoxOptions, languages, QuickPickItemKind, RelativePattern, TextDocument, TextEditorRevealType, UIKind, Uri, ViewColumn, window, workspace, WorkspaceConfiguration } from 'vscode';
+import { CodeActionContext, commands, CompletionItem, ConfigurationTarget, Diagnostic, env, EventEmitter, ExtensionContext, extensions, IndentAction, InputBoxOptions, languages, MarkdownString, QuickPickItemKind, RelativePattern, TextDocument, TextEditorRevealType, UIKind, Uri, ViewColumn, window, workspace, WorkspaceConfiguration } from 'vscode';
 import { CancellationToken, CodeActionParams, CodeActionRequest, Command, CompletionRequest, DidChangeConfigurationNotification, ExecuteCommandParams, ExecuteCommandRequest, LanguageClientOptions, RevealOutputChannelOn } from 'vscode-languageclient';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { apiManager } from './apiManager';
@@ -14,13 +14,13 @@ import { ClientErrorHandler } from './clientErrorHandler';
 import { Commands, CommandTitle } from './commands';
 import { ClientStatus, ExtensionAPI, TraceEvent } from './extension.api';
 import * as fileEventHandler from './fileEventHandler';
-import { getSharedIndexCache, HEAP_DUMP_LOCATION, prepareExecutable, removeEquinoxFragmentOnDarwinX64 } from './javaServerStarter';
+import { getSharedIndexCache, HEAP_DUMP_LOCATION, prepareExecutable, removeEquinoxFragmentOnDarwinX64, startedFromSources } from './javaServerStarter';
 import { initializeLogFile, logger } from './log';
 import { cleanupLombokCache } from "./lombokSupport";
 import { markdownPreviewProvider } from "./markdownPreviewProvider";
 import { OutputInfoCollector } from './outputInfoCollector';
 import { collectJavaExtensions, getBundlesToReload, getShortcuts, IJavaShortcut, isContributedPartUpdated } from './plugin';
-import { registerClientProviders } from './providerDispatcher';
+import { fixJdtSchemeHoverLinks, registerClientProviders } from './providerDispatcher';
 import { initialize as initializeRecommendation } from './recommendation';
 import * as requirements from './requirements';
 import { languageStatusBarProvider } from './runtimeStatusBarProvider';
@@ -30,7 +30,7 @@ import { snippetCompletionProvider } from './snippetCompletionProvider';
 import { JavaClassEditorProvider } from './javaClassEditor';
 import { StandardLanguageClient } from './standardLanguageClient';
 import { SyntaxLanguageClient } from './syntaxLanguageClient';
-import { convertToGlob, deleteClientLog, deleteDirectory, ensureExists, getBuildFilePatterns, getExclusionGlob, getInclusionPatternsFromNegatedExclusion, getJavaConfig, getJavaConfiguration, hasBuildToolConflicts, resolveActualCause } from './utils';
+import { convertToGlob, deleteClientLog, deleteDirectory, ensureExists, getBuildFilePatterns, getExclusionGlob, getInclusionPatternsFromNegatedExclusion, getJavaConfig, getJavaConfiguration, hasBuildToolConflicts, resolveActualCause, getVersion } from './utils';
 import glob = require('glob');
 import { Telemetry } from './telemetry';
 import { getMessage } from './errorUtils';
@@ -93,6 +93,25 @@ function getHeapDumpFolderFromSettings(): string {
 	return results[1] || results[2] || results[3];
 }
 
+const REPLACE_JDT_LINKS_PATTERN: RegExp = /(\[(?:[^\]])+\]\()(jdt:\/\/(?:(?:(?:\\\))|([^)]))+))\)/g;
+
+/**
+ * Replace `jdt://` links in the documentation with links that execute the VS Code command required to open the referenced file.
+ *
+ * Extracted from {@link fixJdtSchemeHoverLinks} for use in completion item documentation.
+ *
+ * @param oldDocumentation the documentation to fix the links in
+ * @returns the documentation with fixed links
+ */
+export function fixJdtLinksInDocumentation(oldDocumentation: MarkdownString): MarkdownString {
+	const newContent: string = oldDocumentation.value.replace(REPLACE_JDT_LINKS_PATTERN, (_substring, group1, group2) => {
+		const uri = `command:${Commands.OPEN_FILE}?${encodeURI(JSON.stringify([encodeURIComponent(group2)]))}`;
+		return `${group1}${uri})`;
+	});
+	const mdString = new MarkdownString(newContent);
+	mdString.isTrusted = true;
+	return mdString;
+}
 
 export async function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 	await loadSupportedJreNames(context);
@@ -140,6 +159,10 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 
 	cleanJavaWorkspaceStorage();
 
+	if (!startedFromSources()) { // Dev mode: version may not match package.json, deleting the in-use folder
+		cleanOldGlobalStorage(context);
+	}
+
 	// https://github.com/redhat-developer/vscode-java/issues/3484
 	if (process.platform === 'darwin' && process.arch === 'x64') {
 		try {
@@ -185,7 +208,7 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 					{ scheme: 'untitled', language: 'java' }
 				],
 				synchronize: {
-					configurationSection: ['java', 'editor.insertSpaces', 'editor.tabSize'],
+					configurationSection: ['java', 'editor.insertSpaces', 'editor.tabSize', "files.associations"],
 				},
 				initializationOptions: {
 					bundles: collectJavaExtensions(extensions.all),
@@ -224,6 +247,13 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 								}
 							});
 						}
+					},
+					resolveCompletionItem: async (item, token, next): Promise<CompletionItem> => {
+						const completionItem = await next(item, token);
+						if (completionItem.documentation instanceof MarkdownString) {
+							completionItem.documentation = fixJdtLinksInDocumentation(completionItem.documentation);
+						}
+						return completionItem;
 					},
 					// https://github.com/redhat-developer/vscode-java/issues/2130
 					// include all diagnostics for the current line in the CodeActionContext params for the performance reason
@@ -1031,7 +1061,7 @@ async function getTriggerFiles(): Promise<string[]> {
 function getJavaFilePathOfTextDocument(document: TextDocument): string | undefined {
 	if (document) {
 		const resource = document.uri;
-		if (resource.scheme === 'file' && resource.fsPath.endsWith('.java')) {
+		if (resource.scheme === 'file' && document.languageId === "java") {
 			return path.normalize(resource.fsPath);
 		}
 	}
@@ -1073,6 +1103,26 @@ async function cleanJavaWorkspaceStorage() {
 			}
 		});
 	}
+}
+
+async function cleanOldGlobalStorage(context: ExtensionContext) {
+	const currentVersion = getVersion(context.extensionPath);
+	const globalStoragePath = context.globalStorageUri?.fsPath; // .../Code/User/globalStorage/redhat.java
+
+	ensureExists(globalStoragePath);
+
+	// delete folders in .../User/globalStorage/redhat.java that are not named the current version
+	fs.promises.readdir(globalStoragePath).then(async (files) => {
+		await Promise.all(files.map(async (file) => {
+			const currentPath = path.join(globalStoragePath, file);
+			const stat = await fs.promises.stat(currentPath);
+
+			if (stat.isDirectory() && file !== currentVersion) {
+				logger.info(`Removing old folder in globalStorage : ${file}`);
+				deleteDirectory(currentPath);
+			}
+		}));
+	});
 }
 
 export function registerCodeCompletionTelemetryListener() {
