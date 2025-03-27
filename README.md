@@ -15,8 +15,8 @@ Quick Start
 ============
 1. Install the Extension
 2. On the following platforms, the extension should activate without any setup : `win32-x64`, `darwin-x64`, `darwin-arm64`, `linux-x64`, `linux-arm64`.\
-If on another platform, or using the "universal" version, you can [set](#setting-the-jdk) a _Java_ Development Kit. It must be Java 17 or above.
-3. Optionally, download and install a Java Development Kit for your project (Java 1.5 or above is supported). See [Project JDKs](#project-jdks) for more details
+If on another platform, or using the "universal" version, you can [set](#setting-the-jdk) a _Java_ Development Kit. It must be Java 21 or above.
+3. Optionally, download and install a Java Development Kit for your project (Java 1.8 or above is supported). See [Project JDKs](#project-jdks) for more details
 4. Extension is activated when you first access a Java file
     * Recognizes projects with *Maven* or *Gradle* build files in the directory hierarchy.
 
@@ -24,7 +24,7 @@ Features
 =========
 ![ screencast ](https://raw.githubusercontent.com/redhat-developer/vscode-java/master/images/vscode-java.0.0.1.gif)
 
-* Supports code from Java 1.5 to Java 22
+* Supports code from Java 1.8 to Java 24
 * Maven pom.xml project support
 * Gradle project support (with experimental Android project import support)
 * Standalone Java files support
@@ -60,7 +60,7 @@ Now that Java extension will publish platform specific versions, it will embed a
 
 The following part is only kept for the universal version without embedded JRE.
 
->The tooling JDK will be used to launch the Language Server for Java. And by default, will also be used to compile your projects. Java 17 is the minimum required version.\
+>The tooling JDK will be used to launch the Language Server for Java. And by default, will also be used to compile your projects. Java 21 is the minimum required version.\
 \
 The path to the Java Development Kit can be specified by the `java.jdt.ls.java.home` setting in VS Code settings (workspace/user settings). If not specified, it is searched in the following order until a JDK meets current minimum requirement.
 >- the `JDK_HOME` environment variable
@@ -81,8 +81,8 @@ If you need to compile your projects against a different JDK version, it's recom
     "path": "/path/to/jdk-11",
   },
   {
-    "name": "JavaSE-22",
-    "path": "/path/to/jdk-22",
+    "name": "JavaSE-24",
+    "path": "/path/to/jdk-24",
     "default": true
   },
 ]
@@ -123,7 +123,7 @@ The following settings are supported:
 * `java.configuration.maven.userSettings` : Path to Maven's user settings.xml.
 * `java.configuration.checkProjectSettingsExclusions`: **Deprecated, please use 'java.import.generatesMetadataFilesAtProjectRoot' to control whether to generate the project metadata files at the project root. And use 'files.exclude' to control whether to hide the project metadata files from the file explorer.** Controls whether to exclude extension-generated project settings files (`.project`, `.classpath`, `.factorypath`, `.settings/`) from the file explorer. Defaults to `false`.
 * `java.referencesCodeLens.enabled` : Enable/disable the references code lenses.
-* `java.implementationsCodeLens.enabled` : Enable/disable the implementations code lenses.
+* `java.implementationCodeLens` : Enable/disable the implementations code lens for the provided categories.
 * `java.signatureHelp.enabled` : Enable/disable signature help support (triggered on `(`).
 * `java.signatureHelp.description.enabled` : Enable/disable to show the description in signature help. Defaults to `false`.
 * `java.contentProvider.preferred` : Preferred content provider (see 3rd party decompilers available in [vscode-java-decompiler](https://github.com/dgileadi/vscode-java-decompiler)).
@@ -248,6 +248,14 @@ The following settings are supported:
 * `java.edit.smartSemicolonDetection.enabled`: Defines the `smart semicolon` detection. Defaults to `false`.
 * `java.configuration.detectJdksAtStart`: Automatically detect JDKs installed on local machine at startup. If you have specified the same JDK version in `java.configuration.runtimes`, the extension will use that version first. Defaults to `true`.
 * `java.completion.collapseCompletionItems`: Enable/disable the collapse of overloaded methods in completion items. Overrides `java.completion.guessMethodArguments`. Defaults to `false`.
+* `java.diagnostic.filter`: Specifies a list of file patterns for which matching documents should not have their diagnostics reported (eg. '\*\*/Foo.java').
+* `java.search.scope`: Specifies the scope which must be used for search operation like
+  - Find Reference
+  - Call Hierarchy
+  - Workspace Symbols
+* `java.jdt.ls.javac.enabled`: [Experimental] Specify whether to enable Javac-based compilation in the language server. Requires running this extension with Java 24. Defaults to `off`.
+* `java.completion.engine`: [Experimental] Select code completion engine. Defaults to `ecj`.
+* `java.references.includeDeclarations`: Include declarations when finding references. Defaults to `true`
 
 Semantic Highlighting
 ===============

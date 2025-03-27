@@ -356,6 +356,16 @@ export namespace Commands {
      */
     export const OPEN_STATUS_SHORTCUT = "_java.openShortcuts";
 
+    /**
+     * Change java search scope.
+     */
+    export const CHANGE_JAVA_SEARCH_SCOPE = "java.change.searchScope";
+
+    /**
+     * Show Extended Outline for current document.
+     */
+    export const SHOW_EXTEND_OUTLINE = 'java.action.showExtendedOutline';
+
 }
 
 /**

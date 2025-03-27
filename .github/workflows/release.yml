@@ -81,12 +81,12 @@ jobs:
       - name: Set Up Java
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '23'
           distribution: 'adopt'
       - name: Build JDT-LS
         if: "${{ inputs.JDT_LS_VERSION == '' }}"
         run: |
-          ./mvnw clean verify -B -DskipTests -Pserver-distro
+          ./mvnw clean verify -B -U -DskipTests -Pserver-distro
           mkdir ../staging
           cp org.eclipse.jdt.ls.product/distro/jdt-language-server-*.tar.gz ../staging
       - name: Check Out VS Code Java
@@ -135,7 +135,7 @@ jobs:
         run: |
           platforms=("win32-x64" "linux-x64" "linux-arm64" "darwin-x64" "darwin-arm64")
           for platform in ${platforms[@]}; do
-            npx gulp download_jre --target ${platform} --javaVersion 17
+            npx gulp download_jre --target ${platform} --javaVersion 21
             vsce package ${{ env.publishPreReleaseFlag }} --target ${platform} -o java-${platform}-${{ env.EXT_VERSION }}-${GITHUB_RUN_NUMBER}.vsix
           done
           rm -rf jre/
@@ -168,7 +168,7 @@ jobs:
       - name: Set Up NodeJS
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
       - name: Install dependencies
         run: |
           npm install -g typescript "@vscode/vsce" "ovsx"

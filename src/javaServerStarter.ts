@@ -11,7 +11,7 @@ import { logger } from './log';
 import { addLombokParam, isLombokSupportEnabled } from './lombokSupport';
 import { RequirementsData } from './requirements';
 import { IS_WORKSPACE_VMARGS_ALLOWED, getJavaEncoding, getJavaagentFlag, getKey, isInWorkspaceFolder } from './settings';
-import { deleteDirectory, ensureExists, getJavaConfiguration, getTimestamp } from './utils';
+import { deleteDirectory, ensureExists, getJavaConfiguration, getTimestamp, getVersion } from './utils';
 import { log } from 'console';
 
 // eslint-disable-next-line no-var
@@ -104,7 +104,56 @@ function prepareParams(requirements: RequirementsData, workspacePath, context: E
 				// See https://github.com/redhat-developer/vscode-java/issues/2264
 				// It requires the internal API sun.nio.fs.WindowsFileAttributes.isDirectoryLink() to check if a Windows directory is symlink.
 				'--add-opens',
-				'java.base/sun.nio.fs=ALL-UNNAMED');
+				'java.base/sun.nio.fs=ALL-UNNAMED'
+				);
+
+	const javacEnabled = 'on' === getJavaConfiguration().get('jdt.ls.javac.enabled');
+	if (javacEnabled) {
+		// Javac flags
+		params.push(
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.javadoc/jdk.javadoc.internal.doclets.formats.html.taglets.snippet=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.javadoc/jdk.javadoc.internal.doclets.formats.html.taglets=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.platform=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.resources=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.compiler/com.sun.tools.javac.jvm=ALL-UNNAMED',
+		'--add-opens',
+		'jdk.zipfs/jdk.nio.zipfs=ALL-UNNAMED',
+		'--add-opens',
+		'java.compiler/javax.tools=ALL-UNNAMED',
+		'--add-opens',
+		'java.base/java.nio.channels=ALL-UNNAMED',
+		'--add-opens',
+		'java.base/sun.nio.ch=ALL-UNNAMED',
+		'-DICompilationUnitResolver=org.eclipse.jdt.core.dom.JavacCompilationUnitResolver',
+		'-DCompilationUnit.DOM_BASED_OPERATIONS=true',
+		'-DAbstractImageBuilder.compilerFactory=org.eclipse.jdt.internal.javac.JavacCompilerFactory'
+		);
+
+		if('dom' === getJavaConfiguration().get('completion.engine')){
+			params.push('-DCompilationUnit.codeComplete.DOM_BASED_OPERATIONS=true');
+		};
+	}
 
 	params.push('-Declipse.application=org.eclipse.jdt.ls.core.id1',
 				'-Dosgi.bundles.defaultStartLevel=4',
@@ -254,15 +303,7 @@ export function getSharedIndexCache(context: ExtensionContext): string {
 
 function resolveConfiguration(context, configDir) {
 	ensureExists(context.globalStoragePath);
-	const extensionPath = path.resolve(context.extensionPath, "package.json");
-	const packageFile = JSON.parse(fs.readFileSync(extensionPath, 'utf8'));
-	let version;
-	if (packageFile) {
-		version = packageFile.version;
-	}
-	else {
-		version = '0.0.0';
-	}
+	const version = getVersion(context.extensionPath);
 	let configuration = path.resolve(context.globalStoragePath, version);
 	ensureExists(configuration);
 	configuration = path.resolve(configuration, configDir);
@@ -288,7 +329,7 @@ function startedInDebugMode(): boolean {
 	return hasDebugFlag(args);
 }
 
-function startedFromSources(): boolean {
+export function startedFromSources(): boolean {
 	return process.env['DEBUG_VSCODE_JAVA'] === 'true';
 }
 

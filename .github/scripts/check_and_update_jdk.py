@@ -5,7 +5,7 @@ import requests
 import json
 import ast
 
-readme_ver_pattern = r'(?:(?<=Supports code from Java 1\.5 to Java )(\d+)|(?<=JavaSE-)~|(?<=path/to/jdk-)~)'  # After resolving current_jdk, we will replace ~
+readme_ver_pattern = r'(?:(?<=Supports code from Java 1\.8 to Java )(\d+)|(?<=JavaSE-)~|(?<=path/to/jdk-)~)'  # After resolving current_jdk, we will replace ~
 
 # Query the Oracle website for the latest JDK version
 response = requests.get('http://javadl-esd-secure.oracle.com/update/baseline.version')
@@ -40,6 +40,10 @@ if latest_jdk != current_jdk:
     all_tests_passed = True
     for i in range(len(tests)):
         response = requests.get(tests[i])
+        if not response.ok:
+            print(f'Test #{i + 1} not found ({tests[i]})')
+            all_tests_passed = False
+            break
         data = ast.literal_eval(response.text)  # Use ast.literal_eval, because response.json() fails
         try:
             if data['status'] != 'PASSED':

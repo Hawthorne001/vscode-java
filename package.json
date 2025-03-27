@@ -5,7 +5,7 @@
   "author": "Red Hat",
   "icon": "icons/icon128.png",
   "license": "EPL-2.0",
-  "version": "1.33.0",
+  "version": "1.42.0",
   "publisher": "redhat",
   "bugs": "https://github.com/redhat-developer/vscode-java/issues",
   "preview": false,
@@ -105,6 +105,11 @@
       {
         "title": "$(trash) Clean Workspace Cache...",
         "command": "java.clean.workspace"
+      },
+      {
+        "command": "java.change.searchScope",
+        "title": "$(search) Search Scope",
+        "category": "Java"
       }
     ],
     "semanticTokenTypes": [
@@ -306,7 +311,7 @@
               "null"
             ],
             "default": null,
-            "description": "Specifies the folder path to the JDK (17 or more recent) used to launch the Java Language Server.\nOn Windows, backslashes must be escaped, i.e.\n\"java.home\":\"C:\\\\Program Files\\\\Java\\\\jdk-17.0_3\"",
+            "description": "Specifies the folder path to the JDK (21 or more recent) used to launch the Java Language Server.\nOn Windows, backslashes must be escaped, i.e.\n\"java.home\":\"C:\\\\Program Files\\\\Java\\\\jdk-21.0_5\"",
             "scope": "machine-overridable",
             "deprecationMessage": "This setting is deprecated, please use 'java.jdt.ls.java.home' instead.",
             "order": 0
@@ -317,7 +322,7 @@
               "null"
             ],
             "default": null,
-            "description": "Specifies the folder path to the JDK (17 or more recent) used to launch the Java Language Server. This setting will replace the Java extension's embedded JRE to start the Java Language Server. \n\nOn Windows, backslashes must be escaped, i.e.\n\"java.jdt.ls.java.home\":\"C:\\\\Program Files\\\\Java\\\\jdk-17.0_3\"",
+            "description": "Specifies the folder path to the JDK (21 or more recent) used to launch the Java Language Server. This setting will replace the Java extension's embedded JRE to start the Java Language Server. \n\nOn Windows, backslashes must be escaped, i.e.\n\"java.jdt.ls.java.home\":\"C:\\\\Program Files\\\\Java\\\\jdk-21.0_5\"",
             "scope": "machine-overridable",
             "order": 10
           },
@@ -403,6 +408,17 @@
             "markdownDescription": "[Experimental] Specify whether to enable Android project importing. When set to `auto`, the Android support will be enabled in Visual Studio Code - Insiders.\n\n**Note:** Only works for Android Gradle Plugin `3.2.0` or higher.",
             "scope": "window",
             "order": 90
+          },
+          "java.jdt.ls.javac.enabled": {
+            "type": "string",
+            "enum": [
+              "on",
+              "off"
+            ],
+            "default": "off",
+            "markdownDescription": "[Experimental] Specify whether to enable Javac-based compilation in the language server. Requires running this extension with Java 23",
+            "scope": "window",
+            "order": 95
           },
           "java.trace.server": {
             "type": "string",
@@ -917,7 +933,9 @@
                     "JavaSE-19",
                     "JavaSE-20",
                     "JavaSE-21",
-                    "JavaSE-22"
+                    "JavaSE-22",
+                    "JavaSE-23",
+                    "JavaSE-24"
                   ],
                   "description": "Java Execution Environment name. Must be unique."
                 },
@@ -1002,6 +1020,21 @@
             "description": "Enable/disable code completion support",
             "scope": "window",
             "order": 10
+          },
+          "java.completion.engine": {
+            "type": "string",
+            "default": "ecj",
+            "description": "[Experimental] Select code completion engine",
+            "scope": "window",
+            "enum": [
+              "ecj",
+              "dom"
+            ],
+            "markdownEnumDescriptions": [
+              "Use ECJ-based code completion engine (default)",
+              "Use (highly experimental) JDT DOM-based code completion engine (requires `java.jdt.ls.javac.enabled` to be `on`)"
+            ],
+            "order": 1000
           },
           "java.completion.postfix.enabled": {
             "type": "boolean",
@@ -1280,7 +1313,10 @@
                 "lambdaExpression",
                 "switchExpression",
                 "tryWithResource",
-                "renameFileToType"
+                "renameFileToType",
+                "organizeImports",
+                "renameUnusedLocalVariables",
+                "useSwitchForInstanceofPattern"
               ]
             },
             "default": [
@@ -1375,10 +1411,22 @@
             "scope": "window",
             "order": 10
           },
-          "java.implementationsCodeLens.enabled": {
-            "type": "boolean",
-            "default": false,
-            "description": "Enable/disable the implementations code lens.",
+          "java.implementationCodeLens": {
+            "type": "string",
+            "enum": [
+              "none",
+              "types",
+              "methods",
+              "all"
+            ],
+            "enumDescriptions": [
+              "Disable the implementations code lens",
+              "Enable the implementations code lens only for types",
+              "Enable the implementations code lens only for methods",
+              "Enable the implementations code lens for types and methods"
+            ],
+            "default": "none",
+            "description": "Enable/disable the implementations code lens for the provided categories.",
             "scope": "window",
             "order": 20
           },
@@ -1389,26 +1437,33 @@
             "scope": "window",
             "order": 30
           },
+          "java.references.includeDeclarations": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include declarations when finding references.",
+            "scope": "window",
+            "order": 40
+          },
           "java.references.includeDecompiledSources": {
             "type": "boolean",
             "default": true,
             "description": "Include the decompiled sources when finding references.",
             "scope": "window",
-            "order": 40
+            "order": 50
           },
           "java.symbols.includeSourceMethodDeclarations": {
             "type": "boolean",
             "markdownDescription": "Include method declarations from source files in symbol search.",
             "default": false,
             "scope": "window",
-            "order": 50
+            "order": 60
           },
           "java.typeHierarchy.lazyLoad": {
             "type": "boolean",
             "default": false,
             "description": "Enable/disable lazy loading the content in type hierarchy. Lazy loading could save a lot of loading time but every type should be expanded manually to load its content.",
             "scope": "window",
-            "order": 60
+            "order": 70
           },
           "java.inlayHints.parameterNames.enabled": {
             "type": "string",
@@ -1425,7 +1480,7 @@
             "default": "literals",
             "markdownDescription": "Enable/disable inlay hints for parameter names:\n```java\n\nInteger.valueOf(/* s: */ '123', /* radix: */ 10)\n \n```\n `#java.inlayHints.parameterNames.exclusions#` can be used to disable the inlay hints for methods.",
             "scope": "window",
-            "order": 70
+            "order": 80
           },
           "java.inlayHints.parameterNames.exclusions": {
             "type": "array",
@@ -1435,7 +1490,22 @@
             "default": [],
             "markdownDescription": "The patterns for the methods that will be disabled to show the inlay hints. Supported pattern examples:\n - `java.lang.Math.*` - All the methods from java.lang.Math.\n - `*.Arrays.asList` - Methods named as 'asList' in the types named as 'Arrays'.\n - `*.println(*)` - Methods named as 'println'.\n - `(from, to)` - Methods with two parameters named as 'from' and 'to'.\n - `(arg*)` - Methods with one parameter whose name starts with 'arg'.",
             "scope": "window",
-            "order": 80
+            "order": 90
+          },
+          "java.search.scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "main"
+            ],
+            "enumDescriptions": [
+              "Search on all classpath entries including reference libraries and projects.",
+              "All classpath entries excluding test classpath entries."
+            ],
+            "default": "all",
+            "markdownDescription": "Specifies the scope which must be used for search operation like \n - Find Reference\n - Call Hierarchy\n - Workspace Symbols",
+            "scope": "window",
+            "order": 100
           }
         }
       },
@@ -1472,6 +1542,15 @@
             "type": "boolean",
             "default": false,
             "markdownDescription": "Specifies whether to recheck all open Java files for diagnostics when editing a Java file.",
+            "scope": "window"
+          },
+          "java.diagnostic.filter": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Specifies a list of file patterns for which matching documents should not have their diagnostics reported (eg. '**/Foo.java').",
             "scope": "window"
           },
           "java.editor.reloadChangedSources": {
@@ -1647,6 +1726,15 @@
         "command": "java.action.doCleanup",
         "title": "%java.action.doCleanup%",
         "category": "Java"
+      },
+      {
+        "command": "java.change.searchScope",
+        "title": "%java.change.searchScope%"
+      },
+      {
+        "command": "java.action.showExtendedOutline",
+        "title": "%java.action.showExtendedOutline%",
+        "category": "Java"
       }
     ],
     "keybindings": [
@@ -1675,6 +1763,11 @@
         "command": "java.action.doCleanup",
         "key": "ctrl+shift+alt+s",
         "when": "javaLSReady && editorLangId == java"
+      },
+      {
+        "command": "java.action.showExtendedOutline",
+        "key": "ctrl+o",
+        "when": "javaLSReady && inQuickOpen"
       }
     ],
     "menus": {
@@ -1863,24 +1956,24 @@
     "css-loader": "^6.7.3",
     "eslint": "^8.13.0",
     "eslint-webpack-plugin": "^3.2.0",
-    "gulp": "^4.0.2",
+    "gulp": "^5.0.0",
     "gulp-decompress": "^3.0.0",
     "gulp-download": "0.0.1",
     "lodash.findindex": "^4.6.0",
     "lodash.template": ">=4.5.0",
     "minimist": ">=1.2.6",
-    "mocha": "^9.2.2",
+    "mocha": "^11.1.0",
     "request": "^2.88.2",
     "sinon": "^14.0.0",
     "style-loader": "^3.3.1",
     "ts-loader": "^9.4.2",
     "typescript": "^4.6.4",
-    "webpack": "^5.76.0",
+    "webpack": "^5.94.0",
     "webpack-cli": "^4.6.0"
   },
   "dependencies": {
-    "@redhat-developer/vscode-extension-proposals": "0.0.22",
-    "@redhat-developer/vscode-redhat-telemetry": "^0.8.0",
+    "@redhat-developer/vscode-extension-proposals": "0.0.23",
+    "@redhat-developer/vscode-redhat-telemetry": "^0.9.0",
     "@vscode/codicons": "^0.0.32",
     "@vscode/webview-ui-toolkit": "1.2.2",
     "chokidar": "^3.5.3",

@@ -41,6 +41,7 @@ import { registerDocumentValidationListener } from './diagnostic';
 import { listJdks, sortJdksBySource, sortJdksByVersion } from './jdkUtils';
 import { ClientCodeActionProvider } from './clientCodeActionProvider';
 import { BuildFileSelector } from './buildFilesSelector';
+import { extendedOutlineQuickPick } from "./outline/extendedOutlineQuickPick";
 
 const extensionName = 'Language Support for Java';
 const GRADLE_CHECKSUM = "gradle/checksum/prompt";
@@ -340,9 +341,17 @@ export class StandardLanguageClient {
 			if (e.name === Telemetry.SERVER_INITIALIZED_EVT) {
 				return Telemetry.sendTelemetry(Telemetry.STARTUP_EVT, e.properties);
 			} else if (e.name === Telemetry.LS_ERROR) {
+				const tags = [];
 				const exception: string = e?.properties.exception;
-				if (exception !== undefined && exception.includes("dtree.ObjectNotFoundException")) {
-					return Telemetry.sendTelemetry(Telemetry.LS_ERROR, e.properties);
+				if (exception !== undefined) {
+					if (exception.includes("dtree.ObjectNotFoundException")) {
+						tags.push("dtree.ObjectNotFoundException");
+					}
+
+					if (tags.length > 0) {
+						e.properties['tags'] = tags;
+						return Telemetry.sendTelemetry(Telemetry.LS_ERROR, e.properties);
+					}
 				}
 			}
 		});
@@ -582,6 +591,17 @@ export class StandardLanguageClient {
 				// Notify jdt content provider to rerender the classfile contents.
 				jdtEventEmitter.fire(classFileUri);
 				return true;
+			}
+		}));
+
+		context.subscriptions.push(commands.registerCommand(Commands.SHOW_EXTEND_OUTLINE, (location: any) => {
+			if (location instanceof Uri) {
+				extendedOutlineQuickPick.open(location);
+			} else {
+				if (window.activeTextEditor?.document?.languageId !== "java") {
+					return;
+				}
+				extendedOutlineQuickPick.open(window.activeTextEditor.document.uri);
 			}
 		}));
 

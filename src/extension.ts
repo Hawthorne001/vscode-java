@@ -6,22 +6,21 @@ import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as semver from 'semver';
-import { CodeActionContext, commands, ConfigurationTarget, Diagnostic, env, EventEmitter, ExtensionContext, extensions, IndentAction, InputBoxOptions, languages, QuickPickItemKind, RelativePattern, TextDocument, TextEditorRevealType, UIKind, Uri, ViewColumn, window, workspace, WorkspaceConfiguration } from 'vscode';
-import { CancellationToken, CodeActionParams, CodeActionRequest, Command, CompletionRequest, DidChangeConfigurationNotification, ExecuteCommandParams, ExecuteCommandRequest, LanguageClientOptions, RevealOutputChannelOn } from 'vscode-languageclient';
+import { CodeActionContext, commands, CompletionItem, ConfigurationTarget, Diagnostic, env, EventEmitter, ExtensionContext, extensions, IndentAction, InputBoxOptions, languages, Location, MarkdownString, QuickPickItemKind, Range, RelativePattern, SnippetString, SnippetTextEdit, TextDocument, TextEditorRevealType, UIKind, Uri, version, ViewColumn, window, workspace, WorkspaceConfiguration, WorkspaceEdit } from 'vscode';
+import { CancellationToken, CodeActionParams, CodeActionRequest, CodeActionResolveRequest, Command, CompletionRequest, DidChangeConfigurationNotification, ExecuteCommandParams, ExecuteCommandRequest, LanguageClientOptions, RevealOutputChannelOn } from 'vscode-languageclient';
 import { LanguageClient } from 'vscode-languageclient/node';
 import { apiManager } from './apiManager';
 import { ClientErrorHandler } from './clientErrorHandler';
 import { Commands, CommandTitle } from './commands';
 import { ClientStatus, ExtensionAPI, TraceEvent } from './extension.api';
 import * as fileEventHandler from './fileEventHandler';
-import { getSharedIndexCache, HEAP_DUMP_LOCATION, prepareExecutable, removeEquinoxFragmentOnDarwinX64 } from './javaServerStarter';
+import { getSharedIndexCache, HEAP_DUMP_LOCATION, prepareExecutable, removeEquinoxFragmentOnDarwinX64, startedFromSources } from './javaServerStarter';
 import { initializeLogFile, logger } from './log';
 import { cleanupLombokCache } from "./lombokSupport";
 import { markdownPreviewProvider } from "./markdownPreviewProvider";
 import { OutputInfoCollector } from './outputInfoCollector';
 import { collectJavaExtensions, getBundlesToReload, getShortcuts, IJavaShortcut, isContributedPartUpdated } from './plugin';
-import { registerClientProviders } from './providerDispatcher';
-import { initialize as initializeRecommendation } from './recommendation';
+import { fixJdtSchemeHoverLinks, registerClientProviders } from './providerDispatcher';
 import * as requirements from './requirements';
 import { languageStatusBarProvider } from './runtimeStatusBarProvider';
 import { serverStatusBarProvider, ShortcutQuickPickItem } from './serverStatusBarProvider';
@@ -30,16 +29,16 @@ import { snippetCompletionProvider } from './snippetCompletionProvider';
 import { JavaClassEditorProvider } from './javaClassEditor';
 import { StandardLanguageClient } from './standardLanguageClient';
 import { SyntaxLanguageClient } from './syntaxLanguageClient';
-import { convertToGlob, deleteClientLog, deleteDirectory, ensureExists, getBuildFilePatterns, getExclusionGlob, getInclusionPatternsFromNegatedExclusion, getJavaConfig, getJavaConfiguration, hasBuildToolConflicts, resolveActualCause } from './utils';
+import { convertToGlob, deleteClientLog, deleteDirectory, ensureExists, getBuildFilePatterns, getExclusionGlob, getInclusionPatternsFromNegatedExclusion, getJavaConfig, getJavaConfiguration, hasBuildToolConflicts, resolveActualCause, getVersion } from './utils';
 import glob = require('glob');
 import { Telemetry } from './telemetry';
 import { getMessage } from './errorUtils';
-import { TelemetryService } from '@redhat-developer/vscode-redhat-telemetry/lib';
 import { activationProgressNotification } from "./serverTaskPresenter";
 import { loadSupportedJreNames } from './jdkUtils';
 import { BuildFileSelector, PICKED_BUILD_FILES, cleanupWorkspaceState } from './buildFilesSelector';
 import { pasteFile } from './pasteAction';
 import { ServerStatusKind } from './serverStatus';
+import { TelemetryService } from '@redhat-developer/vscode-redhat-telemetry/lib/node';
 
 const syntaxClient: SyntaxLanguageClient = new SyntaxLanguageClient();
 const standardClient: StandardLanguageClient = new StandardLanguageClient();
@@ -93,6 +92,25 @@ function getHeapDumpFolderFromSettings(): string {
 	return results[1] || results[2] || results[3];
 }
 
+const REPLACE_JDT_LINKS_PATTERN: RegExp = /(\[(?:[^\]])+\]\()(jdt:\/\/(?:(?:(?:\\\))|([^)]))+))\)/g;
+
+/**
+ * Replace `jdt://` links in the documentation with links that execute the VS Code command required to open the referenced file.
+ *
+ * Extracted from {@link fixJdtSchemeHoverLinks} for use in completion item documentation.
+ *
+ * @param oldDocumentation the documentation to fix the links in
+ * @returns the documentation with fixed links
+ */
+export function fixJdtLinksInDocumentation(oldDocumentation: MarkdownString): MarkdownString {
+	const newContent: string = oldDocumentation.value.replace(REPLACE_JDT_LINKS_PATTERN, (_substring, group1, group2) => {
+		const uri = `command:${Commands.OPEN_FILE}?${encodeURI(JSON.stringify([encodeURIComponent(group2)]))}`;
+		return `${group1}${uri})`;
+	});
+	const mdString = new MarkdownString(newContent);
+	mdString.isTrusted = true;
+	return mdString;
+}
 
 export async function activate(context: ExtensionContext): Promise<ExtensionAPI> {
 	await loadSupportedJreNames(context);
@@ -130,15 +148,17 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 	}
 	initializeLogFile(clientLogFile);
 
-	const telemetryService: Promise<TelemetryService> = Telemetry.startTelemetry(context);
+	Telemetry.startTelemetry(context);
 
 	enableJavadocSymbols();
-
-	initializeRecommendation(context, telemetryService);
 
 	registerOutOfMemoryDetection(storagePath);
 
 	cleanJavaWorkspaceStorage();
+
+	if (!startedFromSources()) { // Dev mode: version may not match package.json, deleting the in-use folder
+		cleanOldGlobalStorage(context);
+	}
 
 	// https://github.com/redhat-developer/vscode-java/issues/3484
 	if (process.platform === 'darwin' && process.arch === 'x64') {
@@ -185,7 +205,7 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 					{ scheme: 'untitled', language: 'java' }
 				],
 				synchronize: {
-					configurationSection: ['java', 'editor.insertSpaces', 'editor.tabSize'],
+					configurationSection: ['java', 'editor.insertSpaces', 'editor.tabSize', "files.associations"],
 				},
 				initializationOptions: {
 					bundles: collectJavaExtensions(extensions.all),
@@ -212,6 +232,7 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 						extractInterfaceSupport: true,
 						advancedUpgradeGradleSupport: true,
 						executeClientCommandSupport: true,
+						snippetEditSupport: true,
 					},
 					triggerFiles,
 				},
@@ -224,6 +245,13 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 								}
 							});
 						}
+					},
+					resolveCompletionItem: async (item, token, next): Promise<CompletionItem> => {
+						const completionItem = await next(item, token);
+						if (completionItem?.documentation instanceof MarkdownString) {
+							completionItem.documentation = fixJdtLinksInDocumentation(completionItem.documentation);
+						}
+						return completionItem;
 					},
 					// https://github.com/redhat-developer/vscode-java/issues/2130
 					// include all diagnostics for the current line in the CodeActionContext params for the performance reason
@@ -273,6 +301,66 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 						}, (error) => {
 							return client.handleFailedRequest(CodeActionRequest.type, token, error, []);
 						});
+					},
+
+					resolveCodeAction: async (item, token, next) => {
+						const client: LanguageClient = standardClient.getClient();
+						const documentUris = [];
+						const snippetEdits = [];
+						return client.sendRequest(CodeActionResolveRequest.type, client.code2ProtocolConverter.asCodeActionSync(item), token).then(async (result) => {
+							if (token.isCancellationRequested) {
+								return item;
+							}
+							const docChanges = result.edit !== undefined ? result.edit.documentChanges : undefined;
+							if (docChanges !== undefined) {
+								for (const docChange of docChanges) {
+									if ("textDocument" in docChange) {
+										for (const edit of docChange.edits) {
+											if ("snippet" in edit) {
+												documentUris.push(Uri.parse(docChange.textDocument.uri).toString());
+												const snippet = new SnippetTextEdit(client.protocol2CodeConverter.asRange((edit as any).range), new SnippetString((edit as any).snippet.value));
+												if (semver.gte(version, '1.98.0')) {
+													snippet["keepWhitespace"] = true;
+												}
+												snippetEdits.push(snippet);
+											}
+										}
+									}
+								}
+								const codeAction = await client.protocol2CodeConverter.asCodeAction(result, token);
+								const docEdits = codeAction.edit !== undefined? codeAction.edit.entries() : [];
+								for (const docEdit of docEdits) {
+									const uri = docEdit[0];
+									if (documentUris.includes(uri.toString())) {
+										const editList = [];
+										for (const edit of docEdit[1]) {
+											let isSnippet = false;
+											snippetEdits.forEach((snippet, index) => {
+												if (edit.range.isEqual(snippet.range) && documentUris[index] === uri.toString()) {
+													editList.push(snippet);
+													isSnippet = true;
+												}
+											});
+											if (!isSnippet) {
+												editList.push(edit);
+											}
+										}
+										codeAction.edit.set(uri, null);
+										codeAction.edit.set(uri, editList);
+									}
+								}
+								return codeAction;
+							}
+							return await client.protocol2CodeConverter.asCodeAction(result, token);
+						}, (error) => {
+							return client.handleFailedRequest(CodeActionResolveRequest.type, token, error, item);
+						});
+					},
+
+					provideReferences: async(document, position, options, token, next): Promise<Location[]> => {
+						// Override includeDeclaration from VS Code by allowing it to be configured
+						options.includeDeclaration = getJavaConfiguration().get('references.includeDeclarations');
+						return await next(document, position, options, token);
 					}
 				},
 				revealOutputChannelOn: RevealOutputChannelOn.Never,
@@ -460,6 +548,16 @@ export async function activate(context: ExtensionContext): Promise<ExtensionAPI>
 					await startStandardServer(context, requirements, clientOptions, workspacePath, true /* triggeredByCommand */);
 				}
 			});
+
+			context.subscriptions.push(commands.registerCommand(Commands.CHANGE_JAVA_SEARCH_SCOPE, async () => {
+				const selection = await window.showQuickPick(["all", "main"], {
+					canPickMany: false,
+					placeHolder: `Current: ${workspace.getConfiguration().get("java.search.scope")}`,
+				});
+				if(selection) {
+					workspace.getConfiguration().update("java.search.scope", selection, false);
+				}
+			}));
 
 			context.subscriptions.push(snippetCompletionProvider.initialize());
 			context.subscriptions.push(serverStatusBarProvider);
@@ -709,6 +807,11 @@ function enableJavadocSymbols() {
 				// e.g.  *-----*/|
 				beforeText: /^(\t|(\ \ ))*\ \*[^/]*\*\/\s*$/,
 				action: { indentAction: IndentAction.None, removeText: 1 }
+			},
+			{
+				// e.g. /// ...| (Markdown javadoc)
+				beforeText: /^\s*\/\/\/(.*)?$/,
+				action: { indentAction: IndentAction.None, appendText: '/// ' }
 			}
 		]
 	});
@@ -1031,7 +1134,7 @@ async function getTriggerFiles(): Promise<string[]> {
 function getJavaFilePathOfTextDocument(document: TextDocument): string | undefined {
 	if (document) {
 		const resource = document.uri;
-		if (resource.scheme === 'file' && resource.fsPath.endsWith('.java')) {
+		if (resource.scheme === 'file' && document.languageId === "java") {
 			return path.normalize(resource.fsPath);
 		}
 	}
@@ -1075,6 +1178,26 @@ async function cleanJavaWorkspaceStorage() {
 	}
 }
 
+async function cleanOldGlobalStorage(context: ExtensionContext) {
+	const currentVersion = getVersion(context.extensionPath);
+	const globalStoragePath = context.globalStorageUri?.fsPath; // .../Code/User/globalStorage/redhat.java
+
+	ensureExists(globalStoragePath);
+
+	// delete folders in .../User/globalStorage/redhat.java that are not named the current version
+	fs.promises.readdir(globalStoragePath).then(async (files) => {
+		await Promise.all(files.map(async (file) => {
+			const currentPath = path.join(globalStoragePath, file);
+			const stat = await fs.promises.stat(currentPath);
+
+			if (stat.isDirectory() && file !== currentVersion) {
+				logger.info(`Removing old folder in globalStorage : ${file}`);
+				deleteDirectory(currentPath);
+			}
+		}));
+	});
+}
+
 export function registerCodeCompletionTelemetryListener() {
 	apiManager.getApiInstance().onDidRequestEnd((traceEvent: TraceEvent) => {
 		if (traceEvent.type === CompletionRequest.method) {
@@ -1087,6 +1210,7 @@ export function registerCodeCompletionTelemetryListener() {
 				resultLength: traceEvent.resultLength || 0,
 				error: !!traceEvent.error,
 				fromSyntaxServer: !!traceEvent.fromSyntaxServer,
+				engine: getJavaConfiguration().get('completion.engine'),
 			};
 			return Telemetry.sendTelemetry(Telemetry.COMPLETION_EVENT, props);
 		}
@@ -1109,6 +1233,9 @@ function registerOutOfMemoryDetection(storagePath: string) {
 			properties: {
 				maxMem: getMaxMemFromConfiguration(true),
 			}
+		});
+		Telemetry.sendTelemetry("java.process.outofmemory", {
+			maxMem: getMaxMemFromConfiguration(true),
 		});
 		showOOMMessage();
 		serverStatusBarProvider.setError();
@@ -1136,5 +1263,3 @@ function registerRestartJavaLanguageServerCommand(context: ExtensionContext) {
 		}
 	}));
 }
-
-
